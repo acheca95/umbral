@@ -1,0 +1,20 @@
+name: umbral_rpg
+description: Una aventura de acción y rol entre bosques malditos y ruinas antiguas.
+publish_to: none
+version: 0.2.0+2
+environment:
+  sdk: ^3.13.3
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.5.5
+  firebase_core: ^4.15.0
+  firebase_auth: ^6.7.0
+  cloud_firestore: ^6.10.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  fake_cloud_firestore: ^4.3.0
+flutter:
+  uses-material-design: true

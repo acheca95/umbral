@@ -1,0 +1,101 @@
+    // BEGIN UMBRAL RPG
+    match /umbralPresenceV1/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['seenAt']) && request.resource.data.seenAt == request.time;
+    }
+    match /umbralSavesV1/{uid} {
+      function owner() { return request.auth != null && request.auth.uid == uid; }
+      function validSave() {
+        let d = request.resource.data;
+        return d.keys().hasOnly(['version','revision','payload','heroClass','level','updatedAt'])
+          && d.version == 1 && d.revision is int && d.revision > 0
+          && d.payload is string && d.payload.size() <= 250000
+          && d.heroClass is int && d.heroClass >= 0 && d.heroClass <= 2
+          && d.level is int && d.level >= 1 && d.level <= 12 && d.updatedAt == request.time;
+      }
+      allow get, delete: if owner();
+      allow create: if owner() && validSave() && request.resource.data.revision == 1;
+      allow update: if owner() && validSave() && request.resource.data.revision == resource.data.revision + 1;
+    }
+    match /umbralRoomsV1/{code} {
+      function signedIn() { return request.auth != null; }
+      function host() { return signedIn() && request.auth.uid == resource.data.hostUid; }
+      function guest() { return signedIn() && request.auth.uid == resource.data.guestUid; }
+      function live() { return resource.data.status != 'closed' && resource.data.expiresAt > request.time; }
+      function playerName(n) { return n is string && n.size() >= 1 && n.size() <= 20; }
+      allow get: if signedIn();
+      allow create: if signedIn() && code.matches('^[A-Z2-9]{6}$')
+        && request.resource.data.keys().hasOnly(['version','hostUid','guestUid','hostName','guestName','hostClass','guestClass','status','createdAt','hostSeen','guestSeen','expiresAt'])
+        && request.resource.data.version == 1 && request.resource.data.hostUid == request.auth.uid
+        && request.resource.data.guestUid == null && request.resource.data.guestName == ''
+        && playerName(request.resource.data.hostName) && request.resource.data.hostClass in [0,1,2]
+        && request.resource.data.guestClass == -1 && request.resource.data.status == 'waiting'
+        && request.resource.data.createdAt == request.time && request.resource.data.hostSeen == request.time
+        && request.resource.data.guestSeen == null && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(121,'m');
+      allow update: if live() && (
+        (host() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hostSeen','status'])
+          && request.resource.data.hostSeen == request.time
+          && (request.resource.data.status == resource.data.status || request.resource.data.status == 'closed'))
+        || (guest() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestSeen','status'])
+          && request.resource.data.guestSeen == request.time
+          && (request.resource.data.status == resource.data.status || request.resource.data.status == 'closed'))
+        || (signedIn() && resource.data.status == 'waiting' && resource.data.guestUid == null
+          && request.auth.uid != resource.data.hostUid && resource.data.hostSeen > request.time - duration.value(25,'s')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestUid','guestName','guestClass','guestSeen','status'])
+          && request.resource.data.guestUid == request.auth.uid && playerName(request.resource.data.guestName)
+          && request.resource.data.guestClass in [0,1,2] && request.resource.data.guestSeen == request.time
+          && request.resource.data.status == 'playing')
+      );
+      allow delete: if host();
+      match /players/{uid} {
+        function room() { return get(/databases/$(database)/documents/umbralRoomsV1/$(code)).data; }
+        function afterRoom() { return getAfter(/databases/$(database)/documents/umbralRoomsV1/$(code)).data; }
+        allow read: if request.auth != null && request.auth.uid in [room().hostUid,room().guestUid];
+        allow create: if request.auth != null && uid == request.auth.uid && afterRoom().guestUid == uid
+          && afterRoom().status == 'playing'
+          && request.resource.data.keys().hasOnly(['payload','createdAt'])
+          && request.resource.data.payload is string && request.resource.data.payload.size() <= 250000
+          && request.resource.data.createdAt == request.time;
+        allow delete: if request.auth != null && request.auth.uid == room().hostUid;
+      }
+      match /state/{id} {
+        function room() { return get(/databases/$(database)/documents/umbralRoomsV1/$(code)).data; }
+        allow read: if request.auth != null && request.auth.uid in [room().hostUid,room().guestUid];
+        allow create, update: if request.auth != null && request.auth.uid == room().hostUid
+          && id == 'world' && room().status == 'playing' && room().expiresAt > request.time
+          && request.resource.data.keys().hasOnly(['payload','seq','sentAt'])
+          && request.resource.data.payload is string && request.resource.data.payload.size() <= 600000
+          && request.resource.data.seq is int && request.resource.data.seq > 0
+          && request.resource.data.sentAt == request.time;
+        allow delete: if request.auth != null && request.auth.uid == room().hostUid;
+      }
+      match /input/{id} {
+        function room() { return get(/databases/$(database)/documents/umbralRoomsV1/$(code)).data; }
+        function validAction(a) {
+          return a is map && a.keys().hasOnly(['id','action','x','y','idItem'])
+            && a.id is int && a.id > 0 && a.id < 1000000000
+            && (
+              (a.action in ['primary','ward','potion','interact','respawn','buy'] && a.keys().hasOnly(['id','action']))
+              || (a.action in ['tap','walk'] && a.x is number && a.y is number && a.x >= 0 && a.x <= 2200 && a.y >= 0 && a.y <= 1600)
+              || (a.action in ['equip','sell'] && a.idItem is int && a.idItem > 0)
+            );
+        }
+        function actionAt(a,i) { return a.size() <= i || validAction(a[i]); }
+        allow read: if request.auth != null && request.auth.uid in [room().hostUid,room().guestUid];
+        allow create, update: if request.auth != null && request.auth.uid == room().guestUid
+          && id == 'guest' && room().status == 'playing' && room().expiresAt > request.time
+          && request.resource.data.keys().hasOnly(['dx','dy','attack','paused','actions','sentAt'])
+          && request.resource.data.dx is number && request.resource.data.dx >= -1 && request.resource.data.dx <= 1
+          && request.resource.data.dy is number && request.resource.data.dy >= -1 && request.resource.data.dy <= 1
+          && request.resource.data.attack is bool && request.resource.data.paused is bool
+          && request.resource.data.sentAt == request.time && request.resource.data.actions is list
+          && request.resource.data.actions.size() <= 4
+          && actionAt(request.resource.data.actions,0) && actionAt(request.resource.data.actions,1)
+          && actionAt(request.resource.data.actions,2) && actionAt(request.resource.data.actions,3);
+        allow delete: if request.auth != null && request.auth.uid == room().hostUid;
+      }
+    }
+    // END UMBRAL RPG

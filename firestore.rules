@@ -1,0 +1,524 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /customMaps/{mapId} {
+      function validMap() {
+        let d = request.resource.data;
+        return d.keys().hasOnly(['name','authorUid','authorName','size','terrain','schemaVersion','createdAt','updatedAt'])
+          && d.name is string && d.name.size() > 0 && d.name.size() <= 60
+          && d.authorName is string && d.authorName.size() <= 60
+          && d.authorUid == request.auth.uid && d.schemaVersion in [1,2]
+          && (d.schemaVersion == 2 || d.terrain.matches('^[.rmeg]+$'))
+          && d.size is int && d.terrain is string
+          && ((d.size == 16 && d.terrain.matches('^[.]{32}[.rmegftu]{192}[.]{32}$'))
+            || (d.size == 24 && d.terrain.matches('^[.]{48}[.rmegftu]{480}[.]{48}$')))
+          && d.terrain.matches('.*m.*') && d.terrain.matches('.*e.*') && d.terrain.matches('.*g.*')
+          && d.updatedAt == request.time;
+      }
+      allow read: if true;
+      allow create: if request.auth != null && validMap() && request.resource.data.createdAt == request.time;
+      allow update: if request.auth != null && resource.data.authorUid == request.auth.uid
+        && validMap() && request.resource.data.createdAt == resource.data.createdAt;
+    }
+    match /duels/{room} {
+      function signed() { return request.auth != null; }
+      function host() { return signed() && resource.data.hostUid == request.auth.uid; }
+      function guest() { return signed() && resource.data.guestUid == request.auth.uid; }
+      function name(value) { return value is string && value.size() <= 60; }
+      function state(value) {
+        return value is map && value.units is list && value.units.size() <= 64
+          && value.time is number && value.time >= 0 && value.time <= 181
+          && value.phase is int && value.phase >= 0 && value.phase <= 5
+          && value.resources is list && value.resources.size() == 3
+          && value.opponentResources is list && value.opponentResources.size() == 3;
+      }
+      allow read: if signed();
+      allow create: if signed()
+        && request.resource.data.keys().hasOnly(['hostUid','hostName','guestUid','guestName','guestLeft','status','createdAt','updatedAt','hostSeen','guestSeen','state','reason','version'])
+        && request.resource.data.hostUid == request.auth.uid
+        && name(request.resource.data.hostName)
+        && request.resource.data.guestUid == null && request.resource.data.guestName == ''
+        && request.resource.data.guestLeft == false && request.resource.data.status == 'waiting'
+        && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
+        && request.resource.data.hostSeen == request.time && request.resource.data.guestSeen == request.time
+        && request.resource.data.reason == '' && request.resource.data.version == 2
+        && state(request.resource.data.state);
+      allow update: if host()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state','status','hostSeen','updatedAt','reason'])
+        && request.resource.data.status in [resource.data.status, 'ended']
+        && request.resource.data.hostSeen == request.time && request.resource.data.updatedAt == request.time
+        && request.resource.data.reason is string && request.resource.data.reason.size() <= 200
+        && state(request.resource.data.state);
+      allow update: if signed() && resource.data.hostUid != request.auth.uid
+        && resource.data.status == 'waiting' && resource.data.guestUid == null
+        && resource.data.hostSeen > request.time - duration.value(30, 's')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestUid','guestName','status','guestSeen','updatedAt'])
+        && request.resource.data.guestUid == request.auth.uid && name(request.resource.data.guestName)
+        && request.resource.data.status == 'playing'
+        && request.resource.data.guestSeen == request.time && request.resource.data.updatedAt == request.time;
+      allow update: if guest()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestLeft','guestSeen'])
+        && request.resource.data.guestLeft is bool
+        && (!resource.data.guestLeft || request.resource.data.guestLeft)
+        && request.resource.data.guestSeen == request.time;
+      match /commands/{command} {
+        function roomData() { return get(/databases/$(database)/documents/duels/$(room)).data; }
+        allow read: if request.auth != null && request.auth.uid in [roomData().hostUid, roomData().guestUid];
+        allow create: if request.auth != null && roomData().guestUid == request.auth.uid
+          && roomData().status == 'playing' && !roomData().guestLeft
+          && request.resource.data.keys().hasOnly(['uid','kind','cell','unit','actor','handled','accepted','createdAt'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.kind in ['deploy','gather','attack']
+          && request.resource.data.cell is int && request.resource.data.cell >= 0 && request.resource.data.cell < 64
+          && request.resource.data.unit is int && request.resource.data.unit >= 0 && request.resource.data.unit < 6
+          && request.resource.data.actor is int && request.resource.data.actor >= 0 && request.resource.data.actor < 10000
+          && request.resource.data.handled == false && request.resource.data.accepted == false
+          && request.resource.data.createdAt == request.time;
+        allow update: if request.auth != null && roomData().hostUid == request.auth.uid
+          && !resource.data.handled
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['handled','accepted'])
+          && request.resource.data.handled == true && request.resource.data.accepted is bool;
+      }
+    }
+    match /duelsV3/{room} {
+      function signed() { return request.auth != null; }
+      function host() { return signed() && resource.data.hostUid == request.auth.uid; }
+      function guest() { return signed() && resource.data.guestUid == request.auth.uid; }
+      function name(value) { return value is string && value.size() <= 60; }
+      function state(value) {
+        return value is map && value.units is list && value.units.size() <= 64
+          && value.time is number && value.time >= 0 && value.time <= 181
+          && value.phase is int && value.phase >= 0 && value.phase <= 5
+          && value.resources is list && value.resources.size() == 3
+          && value.opponentResources is list && value.opponentResources.size() == 3;
+      }
+      allow read: if signed();
+      allow create: if signed()
+        && request.resource.data.keys().hasOnly(['hostUid','hostFaction','guestFaction','hostName','guestUid','guestName','guestLeft','status','createdAt','updatedAt','hostSeen','guestSeen','state','reason','version'])
+        && request.resource.data.hostUid == request.auth.uid
+        && name(request.resource.data.hostName)
+        && request.resource.data.hostFaction is int && request.resource.data.hostFaction >= 0 && request.resource.data.hostFaction < 4
+        && request.resource.data.guestFaction == null
+        && request.resource.data.guestUid == null && request.resource.data.guestName == ''
+        && request.resource.data.guestLeft == false && request.resource.data.status == 'waiting'
+        && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
+        && request.resource.data.hostSeen == request.time && request.resource.data.guestSeen == request.time
+        && request.resource.data.reason == '' && request.resource.data.version == 3
+        && state(request.resource.data.state);
+      allow update: if host()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state','status','hostSeen','updatedAt','reason'])
+        && request.resource.data.status in [resource.data.status, 'ended']
+        && request.resource.data.hostSeen == request.time && request.resource.data.updatedAt == request.time
+        && request.resource.data.reason is string && request.resource.data.reason.size() <= 200
+        && state(request.resource.data.state);
+      allow update: if signed() && resource.data.hostUid != request.auth.uid
+        && resource.data.status == 'waiting' && resource.data.guestUid == null
+        && resource.data.hostSeen > request.time - duration.value(30, 's')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestUid','guestFaction','guestName','status','guestSeen','updatedAt'])
+        && request.resource.data.guestUid == request.auth.uid && name(request.resource.data.guestName)
+        && request.resource.data.guestFaction is int && request.resource.data.guestFaction >= 0 && request.resource.data.guestFaction < 4
+        && request.resource.data.status == 'playing'
+        && request.resource.data.guestSeen == request.time && request.resource.data.updatedAt == request.time;
+      allow update: if guest()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestLeft','guestSeen'])
+        && request.resource.data.guestLeft is bool
+        && (!resource.data.guestLeft || request.resource.data.guestLeft)
+        && request.resource.data.guestSeen == request.time;
+      match /commands/{command} {
+        function roomData() { return get(/databases/$(database)/documents/duelsV3/$(room)).data; }
+        allow read: if request.auth != null && request.auth.uid in [roomData().hostUid, roomData().guestUid];
+        allow create: if request.auth != null && roomData().guestUid == request.auth.uid
+          && roomData().status == 'playing' && !roomData().guestLeft
+          && request.resource.data.keys().hasOnly(['uid','kind','cell','unit','actor','handled','accepted','createdAt'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.kind in ['deploy','gather','attack']
+          && request.resource.data.cell is int && request.resource.data.cell >= 0 && request.resource.data.cell < 64
+          && request.resource.data.unit is int && request.resource.data.unit >= 0 && request.resource.data.unit < 10
+          && request.resource.data.actor is int && request.resource.data.actor >= 0 && request.resource.data.actor < 10000
+          && request.resource.data.handled == false && request.resource.data.accepted == false
+          && request.resource.data.createdAt == request.time;
+        allow update: if request.auth != null && roomData().hostUid == request.auth.uid
+          && !resource.data.handled
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['handled','accepted'])
+          && request.resource.data.handled == true && request.resource.data.accepted is bool;
+      }
+    }
+    match /duelsV4/{room} {
+      function signed() { return request.auth != null; }
+      function host() { return signed() && resource.data.hostUid == request.auth.uid; }
+      function guest() { return signed() && resource.data.guestUid == request.auth.uid; }
+      function name(value) { return value is string && value.size() <= 60; }
+      function state(value) {
+        return value is map && value.units is list && value.units.size() <= 64
+          && value.time is number && value.time >= 0 && value.time <= 181
+          && value.phase is int && value.phase >= 0 && value.phase <= 5
+          && value.resources is list && value.resources.size() == 3
+          && value.opponentResources is list && value.opponentResources.size() == 3;
+      }
+      allow read: if signed() && (resource.data.status == 'waiting' || request.auth.uid in [resource.data.hostUid,resource.data.guestUid]);
+      allow create: if signed()
+        && request.resource.data.keys().hasOnly(['hostUid','hostFaction','guestFaction','hostName','guestUid','guestName','guestLeft','status','createdAt','updatedAt','hostSeen','guestSeen','state','reason','version'])
+        && request.resource.data.hostUid == request.auth.uid
+        && name(request.resource.data.hostName)
+        && request.resource.data.hostFaction is int && request.resource.data.hostFaction >= 0 && request.resource.data.hostFaction < 4
+        && request.resource.data.guestFaction == null
+        && request.resource.data.guestUid == null && request.resource.data.guestName == ''
+        && request.resource.data.guestLeft == false && request.resource.data.status == 'waiting'
+        && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
+        && request.resource.data.hostSeen == request.time && request.resource.data.guestSeen == request.time
+        && request.resource.data.reason == '' && request.resource.data.version == 4
+        && state(request.resource.data.state);
+      allow update: if host()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state','status','hostSeen','updatedAt','reason'])
+        && request.resource.data.status in [resource.data.status, 'ended']
+        && request.resource.data.hostSeen == request.time && request.resource.data.updatedAt == request.time
+        && request.resource.data.reason is string && request.resource.data.reason.size() <= 200
+        && state(request.resource.data.state);
+      allow update: if signed() && resource.data.hostUid != request.auth.uid
+        && resource.data.status == 'waiting' && resource.data.guestUid == null
+        && resource.data.hostSeen > request.time - duration.value(30, 's')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestUid','guestFaction','guestName','status','guestSeen','updatedAt'])
+        && request.resource.data.guestUid == request.auth.uid && name(request.resource.data.guestName)
+        && request.resource.data.guestFaction is int && request.resource.data.guestFaction >= 0 && request.resource.data.guestFaction < 4
+        && request.resource.data.status == 'playing'
+        && request.resource.data.guestSeen == request.time && request.resource.data.updatedAt == request.time;
+      allow update: if guest()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestLeft','guestSeen'])
+        && request.resource.data.guestLeft is bool
+        && (!resource.data.guestLeft || request.resource.data.guestLeft)
+        && request.resource.data.guestSeen == request.time;
+      match /commands/{command} {
+        function roomData() { return get(/databases/$(database)/documents/duelsV4/$(room)).data; }
+        allow read: if request.auth != null && request.auth.uid in [roomData().hostUid, roomData().guestUid];
+        allow create: if request.auth != null && roomData().guestUid == request.auth.uid
+          && roomData().status == 'playing' && !roomData().guestLeft
+          && request.resource.data.keys().hasOnly(['uid','kind','cell','unit','actor','handled','accepted','createdAt'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.kind in ['deploy','gather','attack','move']
+          && request.resource.data.cell is int && request.resource.data.cell >= 0 && request.resource.data.cell < 64
+          && request.resource.data.unit is int && request.resource.data.unit >= 0 && request.resource.data.unit < 10
+          && request.resource.data.actor is int && request.resource.data.actor >= 0 && request.resource.data.actor < 10000
+          && request.resource.data.handled == false && request.resource.data.accepted == false
+          && request.resource.data.createdAt == request.time;
+        allow update: if request.auth != null && roomData().hostUid == request.auth.uid
+          && !resource.data.handled
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['handled','accepted'])
+          && request.resource.data.handled == true && request.resource.data.accepted is bool;
+      }
+    }
+    match /players/{uid}/games/sector_nova {
+      function owner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+      function valid() {
+        let data = request.resource.data;
+        return data.keys().hasOnly(['completed', 'schemaVersion', 'updatedAt'])
+          && data.schemaVersion == 1
+          && data.completed is list
+          && data.completed.size() <= 3
+          && data.completed.hasOnly([0, 1, 2])
+          && (!data.completed.hasAny([1]) || data.completed.hasAny([0]))
+          && (!data.completed.hasAny([2]) || data.completed.hasAll([0, 1]))
+          && data.updatedAt == request.time;
+      }
+      allow read: if owner();
+      allow create: if owner() && valid();
+      allow update: if owner() && valid()
+        && request.resource.data.completed.hasAll(resource.data.completed);
+      allow delete: if false;
+    }
+    // A short-lived, owner-only clock probe avoids trusting device clocks.
+    match /novaCommandPresenceV1/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['seenAt'])
+        && request.resource.data.seenAt == request.time;
+    }
+    // Nova Command V1: casual host-simulated matches. Separate from Sector Nova.
+    match /novaCommandRoomsV1/{code} {
+      function signed() { return request.auth != null; }
+      function participant() { return signed() && request.auth.uid in [resource.data.hostUid, resource.data.guestUid]; }
+      function faction(value) { return value in ['humans','aliens','undead','orcs']; }
+      function name(value) { return value is string && value.size() > 0 && value.size() <= 20; }
+      function host() { return signed() && resource.data.hostUid == request.auth.uid; }
+      function guest() { return signed() && resource.data.guestUid == request.auth.uid; }
+      function endValid() {
+        return request.resource.data.status == 'finished'
+          && request.resource.data.winner in [null,0,1]
+          && request.resource.data.reason is string && request.resource.data.reason.size() <= 120;
+      }
+      allow get: if signed() && (!exists(/databases/$(database)/documents/novaCommandRoomsV1/$(code)) || resource.data.status == 'waiting' || participant());
+      allow list: if signed() && request.query.limit <= 30 && resource.data.public == true && resource.data.status == 'waiting';
+      allow create: if signed() && code.matches('^[A-Z0-9]{6}$')
+        && request.resource.data.keys().hasOnly(['version','guestVersion','hostUid','hostName','hostFaction','guestUid','guestName','guestFaction','public','status','createdAt','expiresAt','hostSeen','guestSeen','winner','reason'])
+        && request.resource.data.version in [1,6]
+        && (request.resource.data.version == 1 || request.resource.data.guestVersion == 0)
+        && request.resource.data.hostUid == request.auth.uid && name(request.resource.data.hostName) && faction(request.resource.data.hostFaction)
+        && request.resource.data.guestUid == null && request.resource.data.guestName == '' && request.resource.data.guestFaction == null
+        && request.resource.data.public is bool && request.resource.data.status == 'waiting'
+        && request.resource.data.createdAt == request.time && request.resource.data.hostSeen == request.time && request.resource.data.guestSeen == null
+        && request.resource.data.expiresAt > request.time && request.resource.data.expiresAt <= request.time + duration.value(16,'m')
+        && request.resource.data.winner == null && request.resource.data.reason == '';
+      // Atomic join: only the first distinct authenticated player can fill the slot.
+      allow update: if signed() && resource.data.status == 'waiting' && resource.data.guestUid == null
+        && request.auth.uid != resource.data.hostUid && resource.data.expiresAt > request.time
+        && resource.data.hostSeen > request.time - duration.value(25,'s')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestUid','guestName','guestFaction','guestSeen','status','guestVersion'])
+        && (resource.data.version == 1 || request.resource.data.guestVersion == 6)
+        && request.resource.data.guestUid == request.auth.uid && name(request.resource.data.guestName) && faction(request.resource.data.guestFaction)
+        && request.resource.data.guestSeen == request.time && request.resource.data.status == 'playing';
+      // Neither host nor guest can rewrite identities, visibility or factions.
+      allow update: if host() && resource.data.status in ['waiting','playing']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hostSeen','status','winner','reason'])
+        && request.resource.data.hostSeen == request.time
+        && ((request.resource.data.status == resource.data.status && request.resource.data.winner == resource.data.winner && request.resource.data.reason == resource.data.reason) || endValid());
+      allow update: if guest() && resource.data.status == 'playing'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestSeen']) && request.resource.data.guestSeen == request.time;
+      // Guest may concede, or claim a timed-out host; cannot claim an arbitrary win.
+      allow update: if guest() && resource.data.status == 'playing'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestSeen','status','winner','reason'])
+        && request.resource.data.guestSeen == request.time && endValid()
+        && (request.resource.data.winner == 0 || (request.resource.data.winner == 1 && resource.data.hostSeen < request.time - duration.value(resource.data.version == 6 ? 60 : 25,'s')));
+      allow delete: if host() && resource.data.status in ['waiting','finished'];
+      match /views/{view} {
+        function room() { return get(/databases/$(database)/documents/novaCommandRoomsV1/$(code)).data; }
+        allow read: if signed() && view == 'guest' && request.auth.uid in [room().hostUid,room().guestUid];
+        allow create, update: if signed() && request.auth.uid == room().hostUid && view == 'guest' && room().status in ['playing','finished']
+          && request.resource.data.keys().hasOnly(['state','sentAt']) && request.resource.data.sentAt == request.time
+          && request.resource.data.state is map && request.resource.data.state.side == 1
+          && request.resource.data.state.entities is list && request.resource.data.state.entities.size() <= 180
+          && request.resource.data.state.visible is list && request.resource.data.state.visible.size() <= 4096
+          && request.resource.data.state.explored is list && request.resource.data.state.explored.size() <= 4096
+          && request.resource.data.state.player is map && request.resource.data.state.status in ['playing','finished'];
+        allow delete: if signed() && request.auth.uid == room().hostUid;
+      }
+      match /commands/{slot} {
+        function room() { return get(/databases/$(database)/documents/novaCommandRoomsV1/$(code)).data; }
+        function payload(c) {
+          return c is map && (
+            (c.type == 'train' && c.keys().hasOnly(['type','id','unit']) && c.id is int && c.id > 0 && c.unit in ['worker','scout','tank','fighter','stinger','queen','wraith','necromancer','gunship','dreadnought','raider','juggernaut'])
+            || (c.type in ['cancel','upgrade','ability'] && c.keys().hasOnly(['type','id']) && c.id is int && c.id > 0)
+            || (c.type == 'build' && c.keys().hasOnly(['type','building','x','z']) && c.building in ['barracks','generator','supply','turret','lab'] && c.x is number && c.z is number && c.x >= 2 && c.x <= 62 && c.z >= 2 && c.z <= 62)
+            || (c.type == 'research' && c.keys().hasOnly(['type','id','tech']) && c.id is int && c.id > 0 && c.tech in ['weapons','armor','economy','command'])
+            || (c.type == 'rally' && c.keys().hasOnly(['type','id','x','z']) && c.id is int && c.id > 0 && c.x is number && c.z is number && c.x >= 1 && c.x <= 63 && c.z >= 1 && c.z <= 63)
+            || (c.type in ['move','attack','gather','stop'] && c.keys().hasOnly(['type','ids','x','z','target']) && c.ids is list && c.ids.size() > 0 && c.ids.size() <= 40
+              && (c.type != 'move' || (c.x is number && c.z is number && c.x >= -100 && c.x <= 148 && c.z >= -100 && c.z <= 148))
+              && (c.type != 'attack' || c.target is int)
+              && (c.type != 'gather' || (c.target is string && c.target.matches('^ore([0-9]|1[01])$'))))
+          );
+        }
+        function freshCommand() {
+          return slot == 'guest' && signed() && request.auth.uid == room().guestUid && room().status == 'playing'
+            && request.resource.data.keys().hasOnly(['nonce','uid','payload','handled','error','createdAt','expiresAt'])
+            && (room().version == 1 || (request.resource.data.expiresAt is timestamp && request.resource.data.expiresAt > request.time && request.resource.data.expiresAt <= request.time + duration.value(12,'s')))
+            && request.resource.data.uid == request.auth.uid && request.resource.data.nonce is string && request.resource.data.nonce.size() <= 50
+            && request.resource.data.createdAt == request.time && request.resource.data.handled == false && request.resource.data.error == '' && payload(request.resource.data.payload);
+        }
+        allow read: if signed() && request.auth.uid in [room().hostUid,room().guestUid];
+        allow create: if freshCommand();
+        allow update: if (freshCommand() && resource.data.handled == true && request.resource.data.nonce != resource.data.nonce)
+          || (signed() && request.auth.uid == room().hostUid && slot == 'guest' && resource.data.handled == false
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['handled','error']) && request.resource.data.handled == true
+            && request.resource.data.error is string && request.resource.data.error.size() <= 200);
+        allow delete: if signed() && request.auth.uid == room().hostUid;
+      }
+    }
+
+    // A short-lived, owner-only clock probe avoids trusting device clocks.
+    match /bastionPresenceV1/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['seenAt'])
+        && request.resource.data.seenAt == request.time;
+    }
+    // Bastion V1: casual host-simulated matches. Isolated from Nova Command.
+    match /bastionRoomsV1/{code} {
+      function signed() { return request.auth != null; }
+      function participant() { return signed() && request.auth.uid in [resource.data.hostUid, resource.data.guestUid]; }
+      function faction(value) { return value in ['humans','aliens','undead','orcs']; }
+      function name(value) { return value is string && value.size() > 0 && value.size() <= 20; }
+      function host() { return signed() && resource.data.hostUid == request.auth.uid; }
+      function guest() { return signed() && resource.data.guestUid == request.auth.uid; }
+      function endValid() {
+        return request.resource.data.status == 'finished'
+          && request.resource.data.winner in [null,0,1]
+          && request.resource.data.reason is string && request.resource.data.reason.size() <= 120;
+      }
+      allow get: if signed() && (!exists(/databases/$(database)/documents/bastionRoomsV1/$(code)) || resource.data.status == 'waiting' || participant());
+      allow list: if signed() && request.query.limit <= 30 && resource.data.public == true && resource.data.status == 'waiting';
+      allow create: if signed() && code.matches('^[A-Z0-9]{6}$')
+        && request.resource.data.keys().hasOnly(['version','hostUid','hostName','hostFaction','guestUid','guestName','guestFaction','public','status','createdAt','expiresAt','hostSeen','guestSeen','winner','reason'])
+        && request.resource.data.version == 1
+        && request.resource.data.hostUid == request.auth.uid && name(request.resource.data.hostName) && faction(request.resource.data.hostFaction)
+        && request.resource.data.guestUid == null && request.resource.data.guestName == '' && request.resource.data.guestFaction == null
+        && request.resource.data.public is bool && request.resource.data.status == 'waiting'
+        && request.resource.data.createdAt == request.time && request.resource.data.hostSeen == request.time && request.resource.data.guestSeen == null
+        && request.resource.data.expiresAt > request.time && request.resource.data.expiresAt <= request.time + duration.value(16,'m')
+        && request.resource.data.winner == null && request.resource.data.reason == '';
+      // Atomic join: only the first distinct authenticated player can fill the slot.
+      allow update: if signed() && resource.data.status == 'waiting' && resource.data.guestUid == null
+        && request.auth.uid != resource.data.hostUid && resource.data.expiresAt > request.time
+        && resource.data.hostSeen > request.time - duration.value(25,'s')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestUid','guestName','guestFaction','guestSeen','status'])
+        && request.resource.data.guestUid == request.auth.uid && name(request.resource.data.guestName) && faction(request.resource.data.guestFaction)
+        && request.resource.data.guestSeen == request.time && request.resource.data.status == 'playing';
+      // Neither host nor guest can rewrite identities, visibility or factions.
+      allow update: if host() && resource.data.status in ['waiting','playing']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hostSeen','status','winner','reason'])
+        && request.resource.data.hostSeen == request.time
+        && ((request.resource.data.status == resource.data.status && request.resource.data.winner == resource.data.winner && request.resource.data.reason == resource.data.reason) || endValid());
+      allow update: if guest() && resource.data.status == 'playing'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestSeen']) && request.resource.data.guestSeen == request.time;
+      // Guest may concede, or claim a timed-out host; cannot claim an arbitrary win.
+      allow update: if guest() && resource.data.status == 'playing'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestSeen','status','winner','reason'])
+        && request.resource.data.guestSeen == request.time && endValid()
+        && (request.resource.data.winner == 0 || (request.resource.data.winner == 1 && resource.data.hostSeen < request.time - duration.value(25,'s')));
+      allow delete: if host() && resource.data.status in ['waiting','finished'];
+      match /views/{view} {
+        function room() { return get(/databases/$(database)/documents/bastionRoomsV1/$(code)).data; }
+        allow read: if signed() && view == 'guest' && request.auth.uid in [room().hostUid,room().guestUid];
+        allow create, update: if signed() && request.auth.uid == room().hostUid && view == 'guest' && room().status in ['playing','finished']
+          && request.resource.data.keys().hasOnly(['state','sentAt']) && request.resource.data.sentAt == request.time
+          && request.resource.data.state is map && request.resource.data.state.side == 1
+          && request.resource.data.state.units is list && request.resource.data.state.units.size() <= 128
+          && request.resource.data.state.memory is map && request.resource.data.state.memory.keys().hasOnly(['0','1'])
+          && request.resource.data.state.metals is list && request.resource.data.state.metals.size() == 2
+          && request.resource.data.state.queues is map && request.resource.data.state.queues.keys().hasOnly(['0','1'])
+          && request.resource.data.state.status in ['playing','finished'];
+        allow delete: if signed() && request.auth.uid == room().hostUid;
+      }
+      match /commands/{slot} {
+        function room() { return get(/databases/$(database)/documents/bastionRoomsV1/$(code)).data; }
+        function payload(c) {
+          return c is map && (
+            (c.type == 'train' && c.keys().hasOnly(['type','unit']) && c.unit in ['worker','scout','tank'])
+            || (c.type == 'cancel' && c.keys().hasOnly(['type']))
+            || (c.type == 'build' && c.keys().hasOnly(['type','building','x','y']) && c.building in ['turret','depot'] && c.x is number && c.y is number && c.x >= 0 && c.x < 32 && c.y >= 0 && c.y < 24)
+            || (c.type == 'stop' && c.keys().hasOnly(['type','ids']) && c.ids is list && c.ids.size() > 0 && c.ids.size() <= 30)
+            || (c.type == 'move' && c.keys().hasOnly(['type','ids','x','y','advance','enemy','ore']) && c.ids is list && c.ids.size() > 0 && c.ids.size() <= 30
+              && c.x is number && c.y is number && c.x >= 0 && c.x < 32 && c.y >= 0 && c.y < 24 && c.advance is bool
+              && (!('enemy' in c) || (c.enemy is int && c.enemy > 0))
+              && (!('ore' in c) || (c.ore is int && c.ore >= 0 && c.ore < 6)))
+          );
+        }
+        function freshCommand() {
+          return slot == 'guest' && signed() && request.auth.uid == room().guestUid && room().status == 'playing'
+            && request.resource.data.keys().hasOnly(['nonce','uid','payload','handled','error','createdAt'])
+            && request.resource.data.uid == request.auth.uid && request.resource.data.nonce is string && request.resource.data.nonce.size() <= 50
+            && request.resource.data.createdAt == request.time && request.resource.data.handled == false && request.resource.data.error == '' && payload(request.resource.data.payload);
+        }
+        allow read: if signed() && request.auth.uid in [room().hostUid,room().guestUid];
+        allow create: if freshCommand();
+        allow update: if (freshCommand() && resource.data.handled == true && request.resource.data.nonce != resource.data.nonce)
+          || (signed() && request.auth.uid == room().hostUid && slot == 'guest' && resource.data.handled == false
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['handled','error']) && request.resource.data.handled == true
+            && request.resource.data.error is string && request.resource.data.error.size() <= 200);
+        allow delete: if signed() && request.auth.uid == room().hostUid;
+      }
+    }
+
+      // BEGIN UMBRAL RPG
+    match /umbralPresenceV1/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['seenAt']) && request.resource.data.seenAt == request.time;
+    }
+    match /umbralSavesV1/{uid} {
+      function owner() { return request.auth != null && request.auth.uid == uid; }
+      function validSave() {
+        let d = request.resource.data;
+        return d.keys().hasOnly(['version','revision','payload','heroClass','level','updatedAt'])
+          && d.version == 1 && d.revision is int && d.revision > 0
+          && d.payload is string && d.payload.size() <= 250000
+          && d.heroClass is int && d.heroClass >= 0 && d.heroClass <= 2
+          && d.level is int && d.level >= 1 && d.level <= 12 && d.updatedAt == request.time;
+      }
+      allow get, delete: if owner();
+      allow create: if owner() && validSave() && request.resource.data.revision == 1;
+      allow update: if owner() && validSave() && request.resource.data.revision == resource.data.revision + 1;
+    }
+    match /umbralRoomsV1/{code} {
+      function signedIn() { return request.auth != null; }
+      function host() { return signedIn() && request.auth.uid == resource.data.hostUid; }
+      function guest() { return signedIn() && request.auth.uid == resource.data.guestUid; }
+      function live() { return resource.data.status != 'closed' && resource.data.expiresAt > request.time; }
+      function playerName(n) { return n is string && n.size() >= 1 && n.size() <= 20; }
+      allow get: if signedIn();
+      allow create: if signedIn() && code.matches('^[A-Z2-9]{6}$')
+        && request.resource.data.keys().hasOnly(['version','hostUid','guestUid','hostName','guestName','hostClass','guestClass','status','createdAt','hostSeen','guestSeen','expiresAt'])
+        && request.resource.data.version == 1 && request.resource.data.hostUid == request.auth.uid
+        && request.resource.data.guestUid == null && request.resource.data.guestName == ''
+        && playerName(request.resource.data.hostName) && request.resource.data.hostClass in [0,1,2]
+        && request.resource.data.guestClass == -1 && request.resource.data.status == 'waiting'
+        && request.resource.data.createdAt == request.time && request.resource.data.hostSeen == request.time
+        && request.resource.data.guestSeen == null && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(121,'m');
+      allow update: if live() && (
+        (host() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hostSeen','status'])
+          && request.resource.data.hostSeen == request.time
+          && (request.resource.data.status == resource.data.status || request.resource.data.status == 'closed'))
+        || (guest() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestSeen','status'])
+          && request.resource.data.guestSeen == request.time
+          && (request.resource.data.status == resource.data.status || request.resource.data.status == 'closed'))
+        || (signedIn() && resource.data.status == 'waiting' && resource.data.guestUid == null
+          && request.auth.uid != resource.data.hostUid && resource.data.hostSeen > request.time - duration.value(25,'s')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guestUid','guestName','guestClass','guestSeen','status'])
+          && request.resource.data.guestUid == request.auth.uid && playerName(request.resource.data.guestName)
+          && request.resource.data.guestClass in [0,1,2] && request.resource.data.guestSeen == request.time
+          && request.resource.data.status == 'playing')
+      );
+      allow delete: if host();
+      match /players/{uid} {
+        function room() { return get(/databases/$(database)/documents/umbralRoomsV1/$(code)).data; }
+        function afterRoom() { return getAfter(/databases/$(database)/documents/umbralRoomsV1/$(code)).data; }
+        allow read: if request.auth != null && request.auth.uid in [room().hostUid,room().guestUid];
+        allow create: if request.auth != null && uid == request.auth.uid && afterRoom().guestUid == uid
+          && afterRoom().status == 'playing'
+          && request.resource.data.keys().hasOnly(['payload','createdAt'])
+          && request.resource.data.payload is string && request.resource.data.payload.size() <= 250000
+          && request.resource.data.createdAt == request.time;
+        allow delete: if request.auth != null && request.auth.uid == room().hostUid;
+      }
+      match /state/{id} {
+        function room() { return get(/databases/$(database)/documents/umbralRoomsV1/$(code)).data; }
+        allow read: if request.auth != null && request.auth.uid in [room().hostUid,room().guestUid];
+        allow create, update: if request.auth != null && request.auth.uid == room().hostUid
+          && id == 'world' && room().status == 'playing' && room().expiresAt > request.time
+          && request.resource.data.keys().hasOnly(['payload','seq','sentAt'])
+          && request.resource.data.payload is string && request.resource.data.payload.size() <= 600000
+          && request.resource.data.seq is int && request.resource.data.seq > 0
+          && request.resource.data.sentAt == request.time;
+        allow delete: if request.auth != null && request.auth.uid == room().hostUid;
+      }
+      match /input/{id} {
+        function room() { return get(/databases/$(database)/documents/umbralRoomsV1/$(code)).data; }
+        function validAction(a) {
+          return a is map && a.keys().hasOnly(['id','action','x','y','idItem'])
+            && a.id is int && a.id > 0 && a.id < 1000000000
+            && (
+              (a.action in ['primary','ward','potion','interact','respawn','buy'] && a.keys().hasOnly(['id','action']))
+              || (a.action in ['tap','walk'] && a.x is number && a.y is number && a.x >= 0 && a.x <= 2200 && a.y >= 0 && a.y <= 1600)
+              || (a.action in ['equip','sell'] && a.idItem is int && a.idItem > 0)
+            );
+        }
+        function actionAt(a,i) { return a.size() <= i || validAction(a[i]); }
+        allow read: if request.auth != null && request.auth.uid in [room().hostUid,room().guestUid];
+        allow create, update: if request.auth != null && request.auth.uid == room().guestUid
+          && id == 'guest' && room().status == 'playing' && room().expiresAt > request.time
+          && request.resource.data.keys().hasOnly(['dx','dy','attack','paused','actions','sentAt'])
+          && request.resource.data.dx is number && request.resource.data.dx >= -1 && request.resource.data.dx <= 1
+          && request.resource.data.dy is number && request.resource.data.dy >= -1 && request.resource.data.dy <= 1
+          && request.resource.data.attack is bool && request.resource.data.paused is bool
+          && request.resource.data.sentAt == request.time && request.resource.data.actions is list
+          && request.resource.data.actions.size() <= 4
+          && actionAt(request.resource.data.actions,0) && actionAt(request.resource.data.actions,1)
+          && actionAt(request.resource.data.actions,2) && actionAt(request.resource.data.actions,3);
+        allow delete: if request.auth != null && request.auth.uid == room().hostUid;
+      }
+    }
+    // END UMBRAL RPG
+
+}
+}

@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "actualizado_el": "2026-10-02",
+  "nombre": "Umbral: Ecos de la Ceniza",
+  "version": "0.2.0+2",
+  "entrega_020": {
+    "estado": "Firebase desplegado, cooperativo y nube validados contra servicio real; APK release entregado",
+    "peticion": "Usuario pidió usar Firebase como Nova Command y eligió guardado y cooperativo",
+    "apk": "releases/umbral-0.2.0+2.apk",
+    "apk_bytes": 52082650,
+    "apk_sha256": "961B3086F713ACEBCC11C53BC190C0B5B51711E30127FC5F3C0DE22E881A6EAD",
+    "build_segundos": 250.8,
+    "firma": "Demo debug; apksigner v2 válido",
+    "firebase": "nova-5d1c5; Android propio 1:36477231534:android:8ca5cee49a6534dfa0283f; opciones públicas en firebase_config.dart",
+    "colecciones": ["umbralSavesV1", "umbralPresenceV1", "umbralRoomsV1"],
+    "cuentas": "Anónima para cooperativo; vínculo a correo/contraseña, inicio de sesión y recuperación por correo. Email/password habilitado en el proyecto compartido.",
+    "nube": "Subir/restaurar explícito desde menú; después subida automática cada 60s de juego. Control de revisión por transacción, no sobrescribe silenciosamente avance de otro dispositivo. Guardado local sigue cada8s.",
+    "coop": "Dos jugadores, código6 caracteres, mundo del anfitrión. Invitado conserva equipo/clase/nivel y adopta zonas/sellos del host. Host simula, invitado predice movimiento y envía entradas300ms, snapshots700ms. Pausa compartida al abrir paneles. Viajes dirigidos por anfitrión. Oro/XP para ambos y botín único.",
+    "limites": ["Sin migración host", "Sin recuperación de sala tras reiniciar proceso", "Reconexión mientras ambos procesos siguen vivos", "Salas caducan2h; no TTL de limpieza automática", "Confía en host y progreso importado; no antitrampas competitivo", "Sin audio; latencia de Firestore visible en combate"],
+    "validacion": "34 tests Flutter PASS, analyze limpio, 48 comprobaciones reglas PASS. Reglas desplegadas y comparadas con remoto, bloques previos conservados.",
+    "firebase_real": "PASS en Chrome: crear/vincular cuenta, entrar desde otro cliente, sala2 jugadores, movimiento invitado autoritativo, pausa, viaje conjunto, combate/recompensas, abandono, subida nube y restauración en tercer cliente. Prueba limpia usuarios/datos temporales.",
+    "capturas": ["releases/umbral-020-coop-host.png", "releases/umbral-020-coop-guest.png", "releases/umbral-020-cloud.png"],
+    "herramientas": "tools/firebase-admin.cjs apps|prepare|deploy|verify; prepare descarga reglas vigentes y deploy comprueba revisión remota. Backup .tmp/rules-before-umbral-020.rules. tools/rules-test.cjs en emulador8088 Java23. tools/coop-live.cjs usa Chrome y servidor tools/serve.cjs puerto8175 sobre mobile/build/web.",
+    "archivos": "cloud.dart, cloud_panel.dart, coop.dart, firebase_config.dart; game.dart/app.dart/world_painter.dart adaptados; umbral.rules y firestore.rules",
+    "pendiente": "Prueba física en dos móviles incluyendo latencia, multitáctil y segundo plano. No hay build pendiente.",
+    "nota": "Las secciones restantes documentan la entrega original0.1.0 y sus límites históricos; consultar README sección0.2.0 primero."
+  },
+  "directorio": "D:/proyectos/umbral_rpg",
+  "contexto_origen": "D:/proyectos/nova_command/PROJECT_CONTEXT.json",
+  "peticion": "Crear un juego Flutter diferente, orientado a un ARPG tipo Diablo simplificado: exploración de zonas, viaje rápido, monstruos con objetos, equipo, hechizos y clases; demo jugable.",
+  "implementacion": {
+    "tipo": "Aventura individual offline 2D cenital; render vectorial original con Flutter Canvas.",
+    "zonas": ["Refugio del Alba", "Bosque de espinas", "Cripta olvidada", "Corazón de ceniza"],
+    "mapa": "Cada zona mide 2200x1600 unidades. Colisiones, navegación por cuadrícula para tocar y caminar, terreno explorado persistente. Cofres con área libre de obstáculos.",
+    "clases": ["Guardián: cuerpo a cuerpo, torbellino y bastión", "Arcanista: ataque a distancia, nova y barrera", "Exploradora: arco, lluvia de flechas y paso del bosque"],
+    "combate": "39 enemigos comunes y tres jefes. Ataque mantenido, habilidades de área, energía regenerativa, enfriamientos, protección y curación, pociones y ataques de jefe anunciados para esquivar.",
+    "progresion": "Experiencia, niveles hasta 12, tres sellos. El jefe del Bosque abre la Cripta; el de la Cripta abre la zona final. Victoria al matar al Rey, con exploración posterior.",
+    "objetos": "Botín aleatorio de monstruos, botín épico garantizado de los primeros jefes y legendario del final. Seis cofres. Cuatro rarezas; arma, armadura y talismán. Mochila de 24, comparación, equipar y vender en Refugio.",
+    "viaje_rapido": "Portales activados por proximidad; atlas permite viajar desde un portal activo a otro descubierto. Acceso a zonas también a pie mediante salidas contextuales.",
+    "guardado": "SharedPreferences: partida JSON y respaldo anterior validado. Escrituras serializadas. Automático cada 8s, al abrir/cerrar paneles, volver al menú y segundo plano. Una partida por instalación; nueva aventura con confirmación.",
+    "muerte": "Revive en Refugio, conserva equipo, enemigos derrotados y progreso. Pierde hasta 15 oro y recibe un mínimo de tres pociones.",
+    "controles": "Palanca y toque para mover; toque en enemigo para acercarse y atacar; ataque mantenido y cuatro botones. Teclado WASD/flechas, Espacio, Q/E/H/F, I/Tab/M/Esc. Vertical y horizontal.",
+    "arte": "Dibujos originales por Canvas, sin paquetes de arte externos. Icono Android vectorial propio. Iconos de interfaz Material."
+  },
+  "tecnologia": {
+    "flutter": "C:/Users/anton/fvm/versions/3.47.4/bin/flutter.bat",
+    "dart": "3.13.3",
+    "cliente": "mobile",
+    "android_id": "dev.umbral.umbral_rpg",
+    "dependencias": ["shared_preferences ^2.5.5"],
+    "java": "C:/Program Files/Java/jdk-17",
+    "gradle_cache": "D:/DevCaches/.gradle",
+    "temporales": "D:/proyectos/umbral_rpg/.tmp",
+    "build": "build-apk.ps1; no ejecutar pruebas Flutter simultáneamente",
+    "firma": "Debug, demo",
+    "web": "flutter run -d web-server --web-hostname 0.0.0.0 --web-port 8174"
+  },
+  "validacion": {
+    "flutter_analyze": "Sin incidencias",
+    "flutter_test": "21 pruebas aprobadas: 17 de motor/persistencia/campaña y 4 de interfaz",
+    "campana": "Simulación determinista completa con las tres clases, ataques normales, hechizos, pociones, mejoras y esquiva; los tres jefes derrotados y 42 bajas por clase, sin alterar daño ni vida del jugador.",
+    "pantallas": "390x844, 844x390 y 320x640: menú, partida, mochila, atlas; muerte y victoria con continuación.",
+    "navegador": "Playwright con Edge headless: menú, movimiento por teclado, salida al Bosque, descubrimiento de portal, viaje rápido ida y vuelta, combate, inventario, pantalla vertical, guardar al menú y recuperación tras recarga. PASS sin excepciones JavaScript.",
+    "capturas": ["releases/umbral-home.png", "releases/umbral-refugio.png", "releases/umbral-map.png", "releases/umbral-battle.png", "releases/umbral-inventory.png", "releases/umbral-mobile.png"],
+    "android_fisico": "Pendiente",
+    "apk_verificado": "aapt: paquete dev.umbral.umbral_rpg, versión 0.1.0+1, etiqueta Umbral, mínimo Android 7/API24, target36, ARM32/ARM64/x86_64. apksigner: firma v2 válida."
+  },
+  "entrega": {
+    "apk": "releases/umbral-0.1.0+1.apk",
+    "estado": "APK release generado y copiado a releases; paquete y firma verificados",
+    "apk_bytes": 46878275,
+    "apk_sha256": "F60129DC36DCD9BF7AB4D2CE60CC5346CB125700AC2E84F5DF7E8B682A016D32",
+    "build_segundos": 40.4,
+    "incidencia_resuelta": "El primer intento falló por rutas Kotlin incrementales entre caché Pub en C: y proyecto en D:. Se aplicó kotlin.incremental=false, como en Nova Command; segundo build correcto. No hay build pendiente."
+  },
+  "limites_demo": [
+    "Sin multijugador ni audio",
+    "Monstruos y cofres finitos; nueva aventura reinicia el mundo",
+    "El daño a enemigos se conserva tras morir",
+    "Enfriamientos y ataques anunciados transitorios se reinician al cargar",
+    "Guardado local; desinstalar o borrar datos elimina la partida",
+    "Arte vectorial 2D, no modelos 3D ni recursos de Diablo"
+  ],
+  "retomar": [
+    "Leer este contexto y README.md",
+    "Proyecto independiente; Nova Command y servicios Firebase compartidos no se han modificado",
+    "Revisar mobile/lib/game.dart para mecánicas, world.dart para contenido, world_painter.dart para render y app.dart para interfaz",
+    "Pruebas de navegador: npm --prefix tools install; npm --prefix tools run smoke con servidor web en 8174 y Edge instalado",
+    "Ejecutar flutter analyze y flutter test antes de compilar con build-apk.ps1",
+    "APK listo en releases; se incluyen seis capturas de interfaz real de navegador",
+    "Instalar APK en Android físico y verificar tacto multitáctil, pausa al segundo plano y guardado"
+  ]
+}

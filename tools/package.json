@@ -1,0 +1,1 @@
+{"name":"umbral-demo-tools","private":true,"scripts":{"smoke":"node web-smoke.cjs","test:rules":"firebase emulators:exec --project demo-umbral --config ../firebase.json --only firestore \"node rules-test.cjs\""},"devDependencies":{"playwright":"^1.62.1","firebase-tools":"15.31.0","firebase":"^12.0.0","@firebase/rules-unit-testing":"^5.0.0"}}
